@@ -29,7 +29,7 @@ def train(net, data_loader, train_optimizer, loss_fn):
                 pos_2.to(DEVICE, non_blocking=True)
         feature_1, out_1 = net(pos_1)
         feature_2, out_2 = net(pos_2)
-        
+
         out = torch.cat([out_1, out_2], dim=0) # [2*B, D]
         sim_matrix = sim_matrix_calc2(out, out, mode='train') # [2*B, 2*B]
         mask = (torch.ones_like(sim_matrix) - torch.eye(2*batch_size,\
@@ -150,7 +150,7 @@ if __name__ == '__main__':
     weight_decay = 1e-4#/batch_size
     lr = 1e-3
     loss_fn = AUCMLoss(device=DEVICE)
-    
+
     learnable_params = list(model.parameters()) + [loss_fn.b]
     optimizer = optim.AdamW(learnable_params, lr=lr,\
             weight_decay=weight_decay)

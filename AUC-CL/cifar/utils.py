@@ -3,6 +3,18 @@ import numpy as np
 from torchvision import transforms
 from torchvision.datasets import CIFAR10
 
+class CIFAR10Single(CIFAR10):
+    def __getitem__(self, index):
+        img, target = self.data[index], self.targets[index]
+        img = Image.fromarray(img)
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
 
 class CIFAR10Pair(CIFAR10):
     """CIFAR10 Dataset.
@@ -33,7 +45,6 @@ class CIFAR10Pair(CIFAR10):
             target = self.target_transform(target)
 
         return pos_1, pos_2, target
-
 
 train_transform = transforms.Compose([
     transforms.RandomResizedCrop(32),
