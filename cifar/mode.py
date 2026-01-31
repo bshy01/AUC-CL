@@ -28,12 +28,14 @@ print("Using device:", DEVICE)
 print("CUDA_VISIBLE_DEVICES:", os.environ["CUDA_VISIBLE_DEVICES"])
 
 # train for one epoch to learn unique features
-def train(net, data_loader, optimizer, loss_type, temperature, batch_size, epoch, epochs, loss_fn=None):
+def train(net, data_loader, optimizer, loss_type, temperature, batch_size, epoch, epochs, loss_fn=None, accum_steps=1):
     net.train()
     total_loss, total_num = 0.0, 0
     train_bar = tqdm(data_loader)
 
-    for batch_data in train_bar:
+    optimizer.zero_grad()
+
+    for step, batch_data in enumerate(train_bar):
         # 1. 데이터 언패킹 분리
         if loss_type == 'supervised':
             # CIFAR10Single 사용: (img, label)
@@ -57,13 +59,14 @@ def train(net, data_loader, optimizer, loss_type, temperature, batch_size, epoch
                 sim = torch.matmul(out, out.T) / temperature
 
                 # 자기 자신 제외 마스크
-                mask = torch.eye(2 * batch_size, device=DEVICE).bool()
+                bs = out_1.size(0)
+                mask = torch.eye(2 * bs, device=DEVICE).bool()
                 sim = sim.masked_fill(mask, -9e15)
 
                 # 정답 레이블 (대각선 대칭 위치)
                 sim_labels = torch.cat([
-                    torch.arange(batch_size, 2 * batch_size),
-                    torch.arange(0, batch_size)
+                    torch.arange(bs, 2 * bs),
+                    torch.arange(0, bs)
                 ]).to(DEVICE)
                 loss = F.cross_entropy(sim, sim_labels)
 
@@ -71,11 +74,13 @@ def train(net, data_loader, optimizer, loss_type, temperature, batch_size, epoch
                 out = torch.cat([out_1, out_2], dim=0)
                 sim_matrix = sim_matrix_calc2(out, out, mode='train')
 
-                mask = (torch.ones_like(sim_matrix) - torch.eye(2 * batch_size, device=DEVICE)).bool()
+                bs = out_1.size(0)
+                mask = (torch.ones_like(sim_matrix) - torch.eye(2 * bs, device=DEVICE)).bool()
                 neg = torch.flatten(sim_matrix.masked_select(mask))
 
                 pos_sim = sim_matrix_calc2(out_1, out_2, mode='train')
-                mask_pos = torch.eye(batch_size, device=DEVICE).bool()
+                bs = out_1.size(0)
+                mask_pos = torch.eye(bs, device=DEVICE).bool()
                 pos = torch.flatten(pos_sim.masked_select(mask_pos))
                 pos = torch.cat([pos, pos], dim=0)
 
@@ -83,14 +88,27 @@ def train(net, data_loader, optimizer, loss_type, temperature, batch_size, epoch
                 y_true = torch.cat([torch.ones_like(pos), torch.zeros_like(neg)], dim=0)
                 loss = loss_fn(y_pred, y_true)
 
-        # 3. 공통 최적화 단계
-        optimizer.zero_grad()
+        # loss 나누기
+        loss = loss / accum_steps
         loss.backward()
-        optimizer.step()
 
-        total_num += batch_size
-        total_loss += loss.item() * batch_size
+        # step 조건
+        if (step + 1) % accum_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        if loss_type == 'supervised':
+            bs = inputs.size(0)
+        else:
+            bs = pos_1.size(0)
+
+        total_num += bs
+        total_loss += loss.item() * bs
         train_bar.set_description(f'Train Epoch: [{epoch}/{epochs}] Loss: {total_loss / total_num:.4f}')
+
+    if (step + 1) % accum_steps != 0:
+        optimizer.step()
+        optimizer.zero_grad()
 
     return total_loss / total_num
 
@@ -144,23 +162,25 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train SimCLR')
     parser.add_argument('--feature_dim', default=128, type=int,
                         help='Feature dim for latent vector')
-    parser.add_argument('--temperature', default=0.5, type=float,
+    parser.add_argument('--temperature', default=0.2, type=float,
                         help='Temperature used in softmax')
     parser.add_argument('--k', default=200, type=int,
                         help='Top k most similar images used to predict the label')
     parser.add_argument('--batch_size', default=128,
                         type=int, help='Number of images in each mini-batch')
-    parser.add_argument('--epochs', default=200, type=int,
+    parser.add_argument('--epochs', default=500, type=int,
                         help='Number of sweeps over the dataset to train')
-    parser.add_argument('--loss', default='supervised', choices=['supervised', 'simclr', 'auc-cl'],
+    parser.add_argument('--loss', default='simclr', choices=['supervised', 'simclr', 'auc-cl'],
                         help='loss type: supervised | simclr | auc-cl'
     )
+    parser.add_argument('--accum_steps', default=16, type=int)
 
     # args parse
     args = parser.parse_args()
     feature_dim, temperature, k = args.feature_dim, args.temperature, args.k
     batch_size, epochs = args.batch_size, args.epochs
     loss_type = args.loss
+    accum_steps = args.accum_steps
 
     # data prepare
 
@@ -206,7 +226,7 @@ if __name__ == '__main__':
             weight_decay=1e-4
         )
 
-    if loss_type == 'simclr':
+    elif loss_type == 'simclr':
         loss_fn = None  # InfoNCE는 함수 안에서 계산
         optimizer = optim.Adam(
             model.parameters(),
@@ -231,7 +251,7 @@ if __name__ == '__main__':
     best_acc = 0.0
     for epoch in range(1, epochs + 1):
         train_loss = train(model, train_loader, optimizer, loss_type,
-                       temperature, batch_size, epoch, epochs, loss_fn=loss_fn)
+                       temperature, batch_size, epoch, epochs, loss_fn=loss_fn, accum_steps=accum_steps)
         writer.add_scalar('Loss/train', train_loss, epoch)
         results['train_loss'].append(train_loss)
         test_acc_1, test_acc_5 = test(model, memory_loader, test_loader, epoch, epochs)
