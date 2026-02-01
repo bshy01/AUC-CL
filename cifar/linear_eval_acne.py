@@ -21,14 +21,14 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_args():
     parser = argparse.ArgumentParser(description='Linear Evaluation on CIFAR-10')
-    parser.add_argument('--model_path', type=str, required=True, help='Path to the pretrained model checkpoint')
+    parser.add_argument('--model_path', type=str, default='', help='Path to the pretrained model checkpoint')
     parser.add_argument('--batch_size', type=int, default=256, help='Batch size for training and testing')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs for linear evaluation')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--feature_dim', type=int, default=128,
                         help='Feature dimension used in pretraining (needed to load model)')
-    parser.add_argument('--data_dir', type=str, default='./data', help='Path to dataset')
-    parser.add_argument('--output_dir', type=str, default='linear_eval_results',
+    parser.add_argument('--data_dir', type=str, default='/shared/data/ACNE04_Total/Cropped Faces', help='Path to dataset')
+    parser.add_argument('--output_dir', type=str, default='sim_acne',
                         help='Directory to save logs and results')
     return parser.parse_args()
 

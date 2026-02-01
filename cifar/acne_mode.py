@@ -32,6 +32,10 @@ print("CUDA_VISIBLE_DEVICES:", os.environ["CUDA_VISIBLE_DEVICES"])
 # train for one epoch to learn unique features
 def train(net, data_loader, optimizer, loss_type, temperature, batch_size, epoch, epochs, loss_fn=None, accum_steps=1):
     net.train()
+    if loss_type in ['simclr', 'auc-cl']:
+        for m in net.modules():
+            if isinstance(m, torch.nn.BatchNorm2d):
+                m.eval()
     total_loss, total_num = 0.0, 0
     train_bar = tqdm(data_loader)
 
@@ -170,7 +174,7 @@ if __name__ == '__main__':
                         help='Top k most similar images used to predict the label')
     parser.add_argument('--batch_size', default=128,
                         type=int, help='Number of images in each mini-batch')
-    parser.add_argument('--epochs', default=500, type=int,
+    parser.add_argument('--epochs', default=200, type=int,
                         help='Number of sweeps over the dataset to train')
     parser.add_argument('--loss', default='simclr', choices=['supervised', 'simclr', 'auc-cl'],
                         help='loss type: supervised | simclr | auc-cl'
@@ -195,7 +199,9 @@ if __name__ == '__main__':
                                         training_mode='supervised',
                                         color=cv2.IMREAD_COLOR)
         train_loader = DataLoader(train_data, batch_size=batch_size,
-                                shuffle=True, num_workers=16, pin_memory=True, drop_last=True)
+                                shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+        class_weights = torch.tensor([1.0, 1.0, 2.0, 2.0]).to(DEVICE)
+        loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
     # simclr/auc-cl일 때
     else:
         # Map loss_type to dataset mode
@@ -206,7 +212,7 @@ if __name__ == '__main__':
                                        training_mode=mode_str,
                                        color=cv2.IMREAD_COLOR)
         train_loader = DataLoader(train_data, batch_size=batch_size,
-                                shuffle=True, num_workers=16, pin_memory=True, drop_last=True)
+                                shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
 
     # 평가용(Memory/Test)은 모드와 상관없이 무조건 Single로 통일
     memory_data = DatasetAcne04Class(root=data_path, train=True, 
@@ -218,11 +224,11 @@ if __name__ == '__main__':
                                    training_mode='supervised',
                                    color=cv2.IMREAD_COLOR)
 
-    memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # model setup and optimizer config
-    model = Model(feature_dim).to(DEVICE)
+    model = Model(feature_dim, num_classes=4).to(DEVICE)
     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).to(DEVICE),))
     flops, params = clever_format([flops, params])
     print('# Model Params: {} FLOPs: {}'.format(params, flops))

@@ -46,14 +46,34 @@ class CIFAR10Pair(CIFAR10):
 
         return pos_1, pos_2, target
 
+# train_transform = transforms.Compose([
+#     transforms.RandomResizedCrop(32),
+#     transforms.RandomHorizontalFlip(p=0.5),
+#     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+#     transforms.RandomGrayscale(p=0.2),
+#     transforms.ToTensor(),
+#     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+#
+# test_transform = transforms.Compose([
+#     transforms.Resize((32, 32)),
+#     transforms.ToTensor(),
+#     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+
+# [수정 1] 224로 변경
 train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(32),
+    # 32 대신 224 사용 (메모리 부족시 128이나 160으로 타협 가능)
+    transforms.RandomResizedCrop(224),
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
     transforms.RandomGrayscale(p=0.2),
     transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+    # [수정 2] Normalize 값을 ImageNet 표준값(일반 사진용)으로 변경
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+])
 
 test_transform = transforms.Compose([
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+    # [수정 2] Normalize 값을 ImageNet 표준값으로 변경
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+])
