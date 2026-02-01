@@ -71,7 +71,7 @@ def main():
     csv_file_path = os.path.join(args.output_dir, 'metrics.csv')
     csv_file = open(csv_file_path, mode='w', newline='')
     csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(['Epoch', 'Train Loss', 'Test Acc', 'Precision', 'Recall', 'F1-Score'])
+    csv_writer.writerow(['Epoch', 'Train Loss', 'Train Acc', 'Test Loss', 'Test Acc', 'Precision', 'Recall', 'F1-Score'])
 
     # 1. Data Preparation
     # Standard augmentation for linear evaluation (SimCLR/MoCo paper style)
@@ -149,6 +149,7 @@ def main():
         classifier.train()
 
         total_loss = 0.0
+        total_correct = 0
         total_num = 0
 
         train_bar = tqdm(train_loader, desc=f'Epoch {epoch}/{args.epochs} [Train]')
@@ -171,30 +172,33 @@ def main():
             optimizer.step()
 
             total_loss += loss.item() * images.size(0)
+            _, predicted = torch.max(logits.data, 1)
+            total_correct += (predicted == labels).sum().item()
             total_num += images.size(0)
 
-            train_bar.set_description(f'Epoch {epoch}/{args.epochs} [Train] Loss: {total_loss / total_num:.4f}')
+            train_bar.set_description(f'Epoch {epoch}/{args.epochs} [Train] Loss: {total_loss / total_num:.4f} Acc: {100. * total_correct / total_num:.2f}%')
 
         avg_train_loss = total_loss / total_num
+        avg_train_acc = 100. * total_correct / total_num
 
         # Evaluation
-        metrics = test(encoder, classifier, test_loader)
+        metrics = test(encoder, classifier, test_loader, criterion)
 
         # Logging
-        logger.info(f"Epoch {epoch} | Train Loss: {avg_train_loss:.4f} | "
-                    f"Test Acc: {metrics['accuracy']:.2f}% | "
+        logger.info(f"Epoch {epoch} | Train Loss: {avg_train_loss:.4f} | Train Acc: {avg_train_acc:.2f}% | "
+                    f"Test Loss: {metrics['loss']:.4f} | Test Acc: {metrics['accuracy']:.2f}% | "
                     f"Prec: {metrics['precision']:.4f} | Rec: {metrics['recall']:.4f} | F1: {metrics['f1']:.4f}")
 
         # TensorBoard
-        writer.add_scalar('Loss/train', avg_train_loss, epoch)
-        writer.add_scalar('Accuracy/test', metrics['accuracy'], epoch)
+        writer.add_scalars('Loss', {'train': avg_train_loss, 'test': metrics['loss']}, epoch)
+        writer.add_scalars('Accuracy', {'train': avg_train_acc, 'test': metrics['accuracy']}, epoch)
         writer.add_scalar('Precision/test', metrics['precision'], epoch)
         writer.add_scalar('Recall/test', metrics['recall'], epoch)
         writer.add_scalar('F1-Score/test', metrics['f1'], epoch)
 
         # CSV
         csv_writer.writerow(
-            [epoch, avg_train_loss, metrics['accuracy'], metrics['precision'], metrics['recall'], metrics['f1']])
+            [epoch, avg_train_loss, avg_train_acc, metrics['loss'], metrics['accuracy'], metrics['precision'], metrics['recall'], metrics['f1']])
         csv_file.flush()  # Ensure data is written
 
         if metrics['accuracy'] > best_acc:
@@ -207,33 +211,41 @@ def main():
     csv_file.close()
 
 
-def test(encoder, classifier, loader):
+def test(encoder, classifier, loader, criterion):
     encoder.eval()
     classifier.eval()
-
+    
     all_preds = []
     all_targets = []
-
+    total_loss = 0.0
+    total_num = 0
+    
     with torch.no_grad():
         for images, labels in tqdm(loader, desc='[Test]'):
             images, labels = images.to(DEVICE), labels.to(DEVICE)
-
+            
             features = encoder(images)
             features = torch.flatten(features, start_dim=1)
             outputs = classifier(features)
-
+            
+            loss = criterion(outputs, labels)
+            total_loss += loss.item() * images.size(0)
+            total_num += images.size(0)
+            
             _, predicted = torch.max(outputs.data, 1)
-
+            
             all_preds.extend(predicted.cpu().numpy())
             all_targets.extend(labels.cpu().numpy())
-
+            
     # Calculate Metrics
     accuracy = 100 * np.mean(np.array(all_preds) == np.array(all_targets))
     precision = precision_score(all_targets, all_preds, average='macro', zero_division=0)
     recall = recall_score(all_targets, all_preds, average='macro', zero_division=0)
     f1 = f1_score(all_targets, all_preds, average='macro', zero_division=0)
-
+    avg_loss = total_loss / total_num
+    
     return {
+        'loss': avg_loss,
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
